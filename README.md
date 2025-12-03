@@ -1,183 +1,173 @@
 # Vanilla Python File API Server
 
-A single-file, dependency-free Python HTTP server for serving files and metadata with security scopes, daemon support, and auto-stop capabilities.
+A single-file, dependency-free Python HTTP server that exposes a REST-like API for file and directory operations. It uses only the Python Standard Library.
 
 ## Features
 
-- **Zero Dependencies**: Runs with standard Python 3 libraries.
-- **Scope Restriction**: Restrict access to specific directories.
-- **Metadata Support**: Retrieve file metadata (owner, permissions, size) as JSON.
-- **Large File Support**: Efficient streaming for large files.
-- **Daemon Mode**: Run in background with PID file management.
-- **Auto-Stop**: Automatically shut down after a specified timeout.
-- **JSON Errors**: Returns structured JSON error responses.
+*   **File Serving**: Read file contents with correct MIME type detection.
+*   **Directory Listing**: List directory contents (recursive support) as JSON.
+*   **Metadata**: Retrieve detailed file/directory metadata (size, owner, permissions, timestamps).
+*   **Scope Restriction**: Restrict access to specific directories for security.
+*   **Daemon Mode**: Run as a background process (`--daemon`).
+*   **Auto-Stop Timeout**: Automatically shut down after a specified duration (`--timeout`).
+*   **Conditional Self-Deletion**: Option to delete the server script itself upon timeout (`--self-delete`).
+*   **API Stop Endpoint**: Remotely stop the server via API call (`--allow-api-stop`).
+*   **JSON Error Responses**: All errors are returned as structured JSON.
+
+## Requirements
+
+*   Python 3.6+
+*   **Standard Library Only**: No `pip install` required.
+
+## Installation
+
+Simply download `file_server.py`.
+
+```bash
+# Verify all required libraries are available
+python3 -c "import http.server, socketserver, os, json, urllib.parse, pwd, grp, argparse, sys, shutil, mimetypes, signal, atexit, time, threading; print('All libraries available')"
+```
 
 ## Usage
 
-```bash
-python3 file_server.py [OPTIONS]
-```
+### Basic Start
+Start the server on default port 7200, serving files from the current directory (and subdirectories).
 
-### Options
-
-| Option | Description | Default |
-| :--- | :--- | :--- |
-| `--port PORT` | Port to run the server on. | `7200` |
-| `--scope [PATH ...]` | List of allowed directory scopes. If omitted, allows ALL paths. | `None` (All) |
-| `--daemon` | Run as a background daemon process. | `False` |
-| `--stop` | Stop the running daemon (requires `--pid-file`). | `False` |
-| `--pid-file PATH` | Path to the PID file. | `file_server.pid` |
-| `--timeout SECONDS` | Auto-stop the server after N seconds. | `None` |
-
-## Examples
-
-### 1. Basic Usage
-Serve files from the current directory on port 7200:
 ```bash
 python3 file_server.py
 ```
 
-### 2. Restricted Scope
-Only allow access to `/var/log` and `/tmp`:
+### Command Line Arguments
+
+| Argument | Description | Default |
+| :--- | :--- | :--- |
+| `--port PORT` | Port to run the server on. | `7200` |
+| `--scope [DIR ...]` | Restrict access to these directories. If omitted, allows ALL. | `None` (All) |
+| `--daemon` | Run as a background daemon process. | `False` |
+| `--stop` | Stop a running daemon (uses PID file). | `False` |
+| `--pid-file FILE` | Path to the PID file. | `file_server.pid` |
+| `--timeout SECONDS` | Auto-stop the server after N seconds. | `None` |
+| `--self-delete` | **Destructive**: Delete `file_server.py` when timeout expires. | `False` |
+| `--allow-api-stop` | Allow stopping the server via `/?cmd=stop`. | `False` |
+
+### Examples
+
+**1. Serve specific directories on port 8080:**
 ```bash
-python3 file_server.py --scope /var/log /tmp
+python3 file_server.py --port 8080 --scope /var/www /tmp/public
 ```
 
-### 3. Daemon Mode
-Start the server in the background:
+**2. Run as a daemon:**
 ```bash
-python3 file_server.py --daemon --pid-file /tmp/server.pid
+python3 file_server.py --daemon --pid-file /tmp/fs.pid
 ```
 
-Stop the server:
+**3. Stop the daemon:**
 ```bash
-python3 file_server.py --stop --pid-file /tmp/server.pid
+python3 file_server.py --stop --pid-file /tmp/fs.pid
 ```
 
-### 4. Auto-Stop Timeout
-Run the server and automatically exit after 60 seconds (useful for temporary access):
+**4. Auto-stop after 5 minutes (300s):**
 ```bash
-python3 file_server.py --timeout 60
+python3 file_server.py --timeout 300
 ```
+
+**5. Auto-stop AND Self-Delete (One-time use server):**
+> [!WARNING]
+> This will **DELETE** the `file_server.py` file when the timer expires.
+```bash
+python3 file_server.py --timeout 300 --self-delete
+```
+
+**6. Allow stopping via API:**
+```bash
+python3 file_server.py --allow-api-stop
+# Then call: curl "http://localhost:7200/?cmd=stop"
+```
+
+---
 
 ## API Endpoints
 
-### Get File Content
-**GET** `/?file-path=/path/to/file`
+All requests use the **GET** method.
 
-Returns the raw file content.
+### 1. Get File Content
+**Parameter**: `file-path` (Absolute path)
 
-### Get File Metadata
-**GET** `/?file-path=/path/to/file&mode=metadata`
-
-Returns JSON metadata:
-```json
-{
-  "path": "/path/to/file",
-  "size": 1024,
-  "owner": "user",
-  "group": "staff",
-  "permissions": "644",
-  "uid": 501,
-  "gid": 20,
-  "atime": 1700000000.0,
-  "mtime": 1700000000.0,
-  "ctime": 1700000000.0
-}
-```
-
-### Get Directory Listing
-**GET** `/?dir-path=/path/to/dir`
-
-Returns a JSON list of files and subdirectories.
-
-**Optional Parameters:**
-- `depth`: Integer (default `0`). If `> 0`, recursively lists contents up to the specified depth.
-
-Example Response (`depth=0`):
-```json
-[
-  {
-    "name": "file.txt",
-    "type": "file",
-    "size": 1024,
-    "owner": "user",
-    "group": "staff",
-    "permissions": "644"
-  },
-  {
-    "name": "subdir",
-    "type": "directory",
-    "size": 0,
-    "owner": "user",
-    "group": "staff",
-    "permissions": "755"
-  }
-]
-```
-
-### Get Directory Metadata
-**GET** `/?dir-path=/path/to/dir&mode=metadata`
-
-Returns JSON metadata for the directory itself.
-
-### Error Responses
-Errors are returned as JSON. If you use `file-path` for a directory or `dir-path` for a file, you will receive a **400 Bad Request**.
-
-```json
-{
-  "error": true,
-  "code": 400,
-  "message": "Requested path is not a file (expected file-path)",
-  "details": "Bad request syntax or unsupported method"
-}
-```
-
-## API Stop Endpoint
-
-You can stop the server remotely using an API call, but only if the server was started with the `--allow-api-stop` flag.
-
-**Start with flag:**
 ```bash
-python3 file_server.py --allow-api-stop ...
+curl "http://localhost:7200/?file-path=/path/to/file.txt"
 ```
+*   **Success**: Returns file content (200 OK).
+*   **Error**: 404 Not Found, 403 Forbidden (Scope), 400 Bad Request (if path is a directory).
 
-**Stop via API:**
+### 2. List Directory
+**Parameter**: `dir-path` (Absolute path)
+**Optional**: `depth` (Recursion depth, default 0)
+
+```bash
+curl "http://localhost:7200/?dir-path=/path/to/dir"
+# Recursive listing (depth 2)
+curl "http://localhost:7200/?dir-path=/path/to/dir&depth=2"
+```
+*   **Success**: Returns JSON list of contents (200 OK).
+*   **Response Format**:
+    ```json
+    [
+      {
+        "name": "file.txt",
+        "type": "file",
+        "size": 1234,
+        "owner": "user",
+        "group": "staff",
+        "permissions": "644"
+      },
+      ...
+    ]
+    ```
+
+### 3. Get Metadata
+**Parameter**: `file-path` OR `dir-path`
+**Parameter**: `mode=metadata`
+
+```bash
+curl "http://localhost:7200/?file-path=/path/to/file.txt&mode=metadata"
+```
+*   **Success**: Returns JSON metadata (200 OK).
+*   **Response Format**:
+    ```json
+    {
+      "path": "/path/to/file.txt",
+      "type": "file",
+      "size": 1024,
+      "owner": "user",
+      "group": "staff",
+      "permissions": "644",
+      "uid": 501,
+      "gid": 20,
+      "atime": 1700000000.0,
+      "mtime": 1700000000.0,
+      "ctime": 1700000000.0
+    }
+    ```
+
+### 4. Stop Server (API)
+**Parameter**: `cmd=stop`
+**Requirement**: Server must be started with `--allow-api-stop`.
+
 ```bash
 curl "http://localhost:7200/?cmd=stop"
 ```
+*   **Success**: Returns `{"message": "Server stopping..."}` (200 OK) and shuts down.
+*   **Error**: 403 Forbidden (if flag not enabled).
 
-If the flag is not provided, this request will return `403 Forbidden`.
+## Error Handling
 
-## Usage Examples
-
-**Note:** Always quote the URL when using `curl` to prevent the shell from interpreting `&`.
-
-> [!WARNING]
-> **Self-Deletion Feature**: If you run the server with `--timeout` AND `--self-delete`, the server script (`file_server.py`) will **DELETE ITSELF** when the timeout expires.
-> Example: `python3 file_server.py --timeout 300 --self-delete`
-
-1.  **Get File Content**:
-    ```bash
-    curl "http://localhost:7200/?file-path=$(pwd)/file_server.py"
-    ```
-
-2.  **Get File Metadata**:
-    ```bash
-    curl "http://localhost:7200/?file-path=$(pwd)/file_server.py&mode=metadata"
-    ```
-
-3.  **List Directory (Immediate Children)**:
-    ```bash
-    curl "http://localhost:7200/?dir-path=$(pwd)"
-    ```
-
-4.  **Recursive Directory Listing (Depth 2)**:
-    ```bash
-    curl "http://localhost:7200/?dir-path=$(pwd)&depth=2"
-    ```
-
-5.  **Get Directory Metadata**:
-    ```bash
-    curl "http://localhost:7200/?dir-path=$(pwd)&mode=metadata"
-    ```
+Errors are returned as JSON:
+```json
+{
+  "error": true,
+  "code": 404,
+  "message": "File/Directory not found",
+  "details": "..."
+}
+```
