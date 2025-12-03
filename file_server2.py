@@ -41,23 +41,6 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_url.query)
         
-        # Check for command
-        cmd = query_params.get('cmd', [None])[0]
-        if cmd == 'stop':
-            if getattr(self.server, 'allow_api_stop', False):
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"message": "Server stopping..."}).encode('utf-8'))
-                
-                def kill_me():
-                    self.server.shutdown()
-                threading.Thread(target=kill_me).start()
-                return
-            else:
-                self.send_error(403, "API stop not allowed (start with --allow-api-stop)")
-                return
-
         # Extract parameters
         # file-path: Path to a file to read
         # dir-path: Path to a directory to list
@@ -389,18 +372,7 @@ def stop_server(pid_file):
             print(str(err))
             sys.exit(1)
 
-def self_delete_script(script_path):
-    """
-    Deletes the script file at the given path.
-    This function is kept separate to allow easy removal of the self-deletion feature.
-    """
-    try:
-        if os.path.exists(script_path):
-            os.remove(script_path)
-    except Exception:
-        pass
-
-def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, self_delete=False, allow_api_stop=False):
+def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None):
     """
     Main entry point to run the server.
     Handles configuration, daemonization, and starting the HTTPServer.
@@ -449,19 +421,23 @@ def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, sel
     server_address = ('', port)
     httpd = http.server.HTTPServer(server_address, FileRequestHandler)
     httpd.scopes = normalized_scopes
-    httpd.allow_api_stop = allow_api_stop
     
     # Auto-stop timeout
     if timeout:
         print(f"Server will auto-stop in {timeout} seconds.")
-        # Capture script path here to ensure it's available in the thread
-        script_path = os.path.abspath(__file__)
-        
         def shutdown_server():
             httpd.shutdown()
             # Self-deletion logic
-            if self_delete:
-                self_delete_script(script_path)
+            try:
+                script_path = os.path.abspath(__file__)
+                print(f"Attempting to delete: {script_path}")
+                if os.path.exists(script_path):
+                    os.remove(script_path)
+                    print("File deleted successfully.")
+                else:
+                    print("File not found.")
+            except Exception as e:
+                print(f"Deletion failed: {e}")
         
         t = threading.Timer(timeout, shutdown_server)
         t.start()
@@ -485,9 +461,7 @@ if __name__ == '__main__':
     parser.add_argument('--stop', action='store_true', help="Stop the running daemon")
     parser.add_argument('--pid-file', default=DEFAULT_PID_FILE, help=f"Path to PID file (default: {DEFAULT_PID_FILE})")
     parser.add_argument('--timeout', type=int, help="Auto-stop the server after N seconds")
-    parser.add_argument('--self-delete', action='store_true', help="Delete the server script file when timeout expires")
-    parser.add_argument('--allow-api-stop', action='store_true', help="Allow stopping the server via API call (/?cmd=stop)")
     
     args = parser.parse_args()
     
-    run(args.scope, args.port, args.daemon, args.stop, args.pid_file, args.timeout, args.self_delete, args.allow_api_stop)
+    run(args.scope, args.port, args.daemon, args.stop, args.pid_file, args.timeout)

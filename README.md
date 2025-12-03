@@ -133,9 +133,29 @@ Errors are returned as JSON. If you use `file-path` for a directory or `dir-path
 }
 ```
 
-## Curl Examples
+## API Stop Endpoint
+
+You can stop the server remotely using an API call, but only if the server was started with the `--allow-api-stop` flag.
+
+**Start with flag:**
+```bash
+python3 file_server.py --allow-api-stop ...
+```
+
+**Stop via API:**
+```bash
+curl "http://localhost:7200/?cmd=stop"
+```
+
+If the flag is not provided, this request will return `403 Forbidden`.
+
+## Usage Examples
 
 **Note:** Always quote the URL when using `curl` to prevent the shell from interpreting `&`.
+
+> [!WARNING]
+> **Self-Deletion Feature**: If you run the server with `--timeout` AND `--self-delete`, the server script (`file_server.py`) will **DELETE ITSELF** when the timeout expires.
+> Example: `python3 file_server.py --timeout 300 --self-delete`
 
 1.  **Get File Content**:
     ```bash
