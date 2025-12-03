@@ -86,6 +86,55 @@ Returns JSON metadata:
 }
 ```
 
+### Get Directory Listing
+**GET** `/?path=/path/to/dir`
+
+Returns a JSON list of files and subdirectories.
+
+**Optional Parameters:**
+- `depth`: Integer (default `0`). If `> 0`, recursively lists contents up to the specified depth.
+
+Example Response (`depth=0`):
+```json
+[
+  {
+    "name": "file.txt",
+    "type": "file",
+    "size": 1024,
+    "owner": "user",
+    "group": "staff",
+    "permissions": "644"
+  },
+  {
+    "name": "subdir",
+    "type": "directory",
+    "size": 0,
+    "owner": "user",
+    "group": "staff",
+    "permissions": "755"
+  }
+]
+```
+
+Example Response (`depth=1`):
+```json
+[
+  {
+    "name": "subdir",
+    "type": "directory",
+    "contents": [
+      {"name": "nested.txt", "type": "file", "size": 512}
+    ]
+  },
+  {"name": "file.txt", "type": "file", "size": 1024}
+]
+```
+
+### Get Directory Metadata
+**GET** `/?path=/path/to/dir&mode=metadata`
+
+Returns JSON metadata for the directory itself (same fields as file metadata).
+
 ### Error Responses
 Errors are returned as JSON:
 ```json
@@ -96,3 +145,32 @@ Errors are returned as JSON:
   "details": "Nothing matches the given URI"
 }
 ```
+
+## Curl Examples
+
+**Note:** Always quote the URL when using `curl` to prevent the shell from interpreting `&`.
+
+1.  **Get File Content**:
+    ```bash
+    curl "http://localhost:7200/?path=$(pwd)/file_server.py"
+    ```
+
+2.  **Get File Metadata**:
+    ```bash
+    curl "http://localhost:7200/?path=$(pwd)/file_server.py&mode=metadata"
+    ```
+
+3.  **List Directory (Immediate Children)**:
+    ```bash
+    curl "http://localhost:7200/?path=$(pwd)"
+    ```
+
+4.  **Recursive Directory Listing (Depth 2)**:
+    ```bash
+    curl "http://localhost:7200/?path=$(pwd)&depth=2"
+    ```
+
+5.  **Get Directory Metadata**:
+    ```bash
+    curl "http://localhost:7200/?path=$(pwd)&mode=metadata"
+    ```

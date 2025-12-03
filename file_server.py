@@ -31,6 +31,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         # Extract parameters
         file_path_param = query_params.get('path', [None])[0]
         mode = query_params.get('mode', ['content'])[0]
+        try:
+            depth = int(query_params.get('depth', [0])[0])
+        except ValueError:
+            depth = 0
         
         if not file_path_param:
             self.send_error(400, "Missing 'path' query parameter")
@@ -82,7 +86,7 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         if mode == 'metadata':
             self.handle_metadata(target_path)
         else:
-            self.handle_content(target_path)
+            self.handle_content(target_path, depth)
 
     def handle_metadata(self, file_path):
         try:
@@ -124,10 +128,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(500, f"Error retrieving metadata: {str(e)}")
 
-    def handle_content(self, file_path):
+    def handle_content(self, file_path, depth=0):
         try:
             if os.path.isdir(file_path):
-                self.handle_directory_listing(file_path)
+                self.handle_directory_listing(file_path, depth)
                 return
 
             # Detect MIME type
@@ -152,21 +156,9 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(500, f"Error reading file: {str(e)}")
 
-    def handle_directory_listing(self, dir_path):
+    def handle_directory_listing(self, dir_path, depth=0):
         try:
-            contents = []
-            with os.scandir(dir_path) as it:
-                for entry in it:
-                    entry_type = "directory" if entry.is_dir() else "file"
-                    size = entry.stat().st_size if entry.is_file() else 0
-                    contents.append({
-                        "name": entry.name,
-                        "type": entry_type,
-                        "size": size
-                    })
-            
-            # Sort by type (dirs first) then name
-            contents.sort(key=lambda x: (0 if x['type'] == 'directory' else 1, x['name']))
+            contents = self._get_directory_contents(dir_path, depth)
             
             response_content = json.dumps(contents, indent=2).encode('utf-8')
             
@@ -180,6 +172,56 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(403, "Permission denied listing directory")
         except Exception as e:
             self.send_error(500, f"Error listing directory: {str(e)}")
+
+    def _get_directory_contents(self, dir_path, depth):
+        contents = []
+        with os.scandir(dir_path) as it:
+            for entry in it:
+                entry_type = "directory" if entry.is_dir() else "file"
+                
+                # Get metadata
+                try:
+                    stat_info = entry.stat()
+                    size = stat_info.st_size if entry.is_file() else 0
+                    permissions = oct(stat_info.st_mode)[-3:]
+                    
+                    try:
+                        owner = pwd.getpwuid(stat_info.st_uid).pw_name
+                    except KeyError:
+                        owner = str(stat_info.st_uid)
+                        
+                    try:
+                        group = grp.getgrgid(stat_info.st_gid).gr_name
+                    except KeyError:
+                        group = str(stat_info.st_gid)
+                except OSError:
+                    # Fallback if stat fails
+                    size = 0
+                    permissions = ""
+                    owner = ""
+                    group = ""
+                
+                item = {
+                    "name": entry.name,
+                    "type": entry_type,
+                    "size": size,
+                    "owner": owner,
+                    "group": group,
+                    "permissions": permissions
+                }
+                
+                if entry.is_dir() and depth > 0:
+                    try:
+                        item["contents"] = self._get_directory_contents(entry.path, depth - 1)
+                    except PermissionError:
+                         item["contents"] = None
+                         item["error"] = "Permission denied"
+                
+                contents.append(item)
+        
+        # Sort by type (dirs first) then name
+        contents.sort(key=lambda x: (0 if x['type'] == 'directory' else 1, x['name']))
+        return contents
 
     def send_error(self, code, message=None, explain=None):
         """
