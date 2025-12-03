@@ -118,6 +118,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.handle_directory_listing(target_path, depth)
 
     def handle_metadata(self, file_path):
+        """
+        Retrieves and returns metadata for a file or directory.
+        Returns JSON containing size, owner, group, permissions, and timestamps.
+        """
         try:
             stat_info = os.stat(file_path)
             
@@ -158,6 +162,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, f"Error retrieving metadata: {str(e)}")
 
     def handle_content(self, file_path, depth=0):
+        """
+        Serves the content of a file.
+        Detects MIME type and streams content using shutil.copyfileobj for efficiency.
+        """
         try:
             # Detect MIME type
             mime_type, _ = mimetypes.guess_type(file_path)
@@ -182,6 +190,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, f"Error reading file: {str(e)}")
 
     def handle_directory_listing(self, dir_path, depth=0):
+        """
+        Serves a JSON listing of a directory's contents.
+        Supports recursive listing via the 'depth' parameter.
+        """
         try:
             contents = self._get_directory_contents(dir_path, depth)
             
@@ -199,6 +211,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(500, f"Error listing directory: {str(e)}")
 
     def _get_directory_contents(self, dir_path, depth):
+        """
+        Helper to recursively fetch directory contents.
+        Returns a list of dictionaries with file/dir details.
+        """
         contents = []
         with os.scandir(dir_path) as it:
             for entry in it:
@@ -282,6 +298,7 @@ def daemonize(pid_file):
     """
     Detach a process from the controlling terminal and run it in the
     background as a daemon.
+    Uses the double-fork magic to ensure the process is fully detached.
     """
     try:
         pid = os.fork()
@@ -328,6 +345,7 @@ def daemonize(pid_file):
 def stop_server(pid_file):
     """
     Stop the daemon process specified in the pid_file.
+    Sends SIGTERM to the process ID found in the file.
     """
     if not os.path.exists(pid_file):
         print(f"PID file '{pid_file}' not found. Is the server running?")
@@ -355,6 +373,10 @@ def stop_server(pid_file):
             sys.exit(1)
 
 def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None):
+    """
+    Main entry point to run the server.
+    Handles configuration, daemonization, and starting the HTTPServer.
+    """
     # Resolve PID file path
     if pid_file:
         pid_file = os.path.abspath(pid_file)
