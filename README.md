@@ -63,12 +63,12 @@ python3 file_server.py --timeout 60
 ## API Endpoints
 
 ### Get File Content
-**GET** `/?path=/path/to/file`
+**GET** `/?file-path=/path/to/file`
 
 Returns the raw file content.
 
 ### Get File Metadata
-**GET** `/?path=/path/to/file&mode=metadata`
+**GET** `/?file-path=/path/to/file&mode=metadata`
 
 Returns JSON metadata:
 ```json
@@ -87,7 +87,7 @@ Returns JSON metadata:
 ```
 
 ### Get Directory Listing
-**GET** `/?path=/path/to/dir`
+**GET** `/?dir-path=/path/to/dir`
 
 Returns a JSON list of files and subdirectories.
 
@@ -116,33 +116,20 @@ Example Response (`depth=0`):
 ]
 ```
 
-Example Response (`depth=1`):
-```json
-[
-  {
-    "name": "subdir",
-    "type": "directory",
-    "contents": [
-      {"name": "nested.txt", "type": "file", "size": 512}
-    ]
-  },
-  {"name": "file.txt", "type": "file", "size": 1024}
-]
-```
-
 ### Get Directory Metadata
-**GET** `/?path=/path/to/dir&mode=metadata`
+**GET** `/?dir-path=/path/to/dir&mode=metadata`
 
-Returns JSON metadata for the directory itself (same fields as file metadata).
+Returns JSON metadata for the directory itself.
 
 ### Error Responses
-Errors are returned as JSON:
+Errors are returned as JSON. If you use `file-path` for a directory or `dir-path` for a file, you will receive a **400 Bad Request**.
+
 ```json
 {
   "error": true,
-  "code": 404,
-  "message": "File not found",
-  "details": "Nothing matches the given URI"
+  "code": 400,
+  "message": "Requested path is not a file (expected file-path)",
+  "details": "Bad request syntax or unsupported method"
 }
 ```
 
@@ -152,25 +139,25 @@ Errors are returned as JSON:
 
 1.  **Get File Content**:
     ```bash
-    curl "http://localhost:7200/?path=$(pwd)/file_server.py"
+    curl "http://localhost:7200/?file-path=$(pwd)/file_server.py"
     ```
 
 2.  **Get File Metadata**:
     ```bash
-    curl "http://localhost:7200/?path=$(pwd)/file_server.py&mode=metadata"
+    curl "http://localhost:7200/?file-path=$(pwd)/file_server.py&mode=metadata"
     ```
 
 3.  **List Directory (Immediate Children)**:
     ```bash
-    curl "http://localhost:7200/?path=$(pwd)"
+    curl "http://localhost:7200/?dir-path=$(pwd)"
     ```
 
 4.  **Recursive Directory Listing (Depth 2)**:
     ```bash
-    curl "http://localhost:7200/?path=$(pwd)&depth=2"
+    curl "http://localhost:7200/?dir-path=$(pwd)&depth=2"
     ```
 
 5.  **Get Directory Metadata**:
     ```bash
-    curl "http://localhost:7200/?path=$(pwd)&mode=metadata"
+    curl "http://localhost:7200/?dir-path=$(pwd)&mode=metadata"
     ```

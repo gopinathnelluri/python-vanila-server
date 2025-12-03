@@ -1,19 +1,19 @@
-import http.server
-import socketserver
-import os
-import json
-import urllib.parse
-import pwd
-import grp
-import argparse
-import sys
+import http.server  # Provides the basic HTTP server classes (HTTPServer, BaseHTTPRequestHandler)
+import socketserver # Mixin class used by HTTPServer for TCP socket handling
+import os           # Operating system interfaces (file system, process management, etc.)
+import json         # JSON encoder/decoder for API responses
+import urllib.parse # Parsing URLs and query parameters
+import pwd          # Password database access (to get file owner name)
+import grp          # Group database access (to get file group name)
+import argparse     # Command-line argument parsing
+import sys          # System-specific parameters and functions (stdin/stdout, exit)
 
-import shutil
-import mimetypes
-import signal
-import atexit
-import time
-import threading
+import shutil       # High-level file operations (used for efficient file copying/streaming)
+import mimetypes    # Map filenames to MIME types (e.g., .html -> text/html)
+import signal       # Signal handling (SIGTERM) for graceful shutdown
+import atexit       # Register functions to be called when the program exits (cleanup)
+import time         # Time access and conversions (sleep)
+import threading    # Thread-based parallelism (used for auto-stop timer)
 
 # Default configuration
 DEFAULT_PORT = 7200
@@ -24,44 +24,64 @@ DEFAULT_SCOPES = []
 DEFAULT_PID_FILE = "file_server.pid"
 
 class FileRequestHandler(http.server.BaseHTTPRequestHandler):
+    """
+    Custom HTTP request handler to serve files and directories.
+    Handles GET requests with support for:
+    - File content serving
+    - Directory listing (recursive)
+    - Metadata retrieval
+    - Scope restriction
+    """
     def do_GET(self):
+        """
+        Handle GET requests.
+        Parses query parameters, performs security checks (scope, path traversal),
+        and dispatches to the appropriate handler (content or metadata).
+        """
         parsed_url = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_url.query)
         
         # Extract parameters
-        file_path_param = query_params.get('path', [None])[0]
+        # file-path: Path to a file to read
+        # dir-path: Path to a directory to list
+        # mode: 'content' (default) or 'metadata'
+        # depth: Recursion depth for directory listing
+        file_path_param = query_params.get('file-path', [None])[0]
+        dir_path_param = query_params.get('dir-path', [None])[0]
         mode = query_params.get('mode', ['content'])[0]
         try:
             depth = int(query_params.get('depth', [0])[0])
         except ValueError:
             depth = 0
         
-        if not file_path_param:
-            self.send_error(400, "Missing 'path' query parameter")
+        # Validate that exactly one path parameter is provided
+        if file_path_param and dir_path_param:
+            self.send_error(400, "Ambiguous request: Cannot provide both 'file-path' and 'dir-path'")
             return
+            
+        if not file_path_param and not dir_path_param:
+            self.send_error(400, "Missing 'file-path' or 'dir-path' query parameter")
+            return
+
+        target_param = file_path_param if file_path_param else dir_path_param
+        is_file_request = bool(file_path_param)
 
         # Security: Resolve absolute path and check against scope
         try:
-            # Resolve target path
-            if os.path.isabs(file_path_param):
-                target_path = os.path.normpath(file_path_param)
+            # Resolve target path to an absolute path, normalizing '..' components
+            if os.path.isabs(target_param):
+                target_path = os.path.normpath(target_param)
             else:
-                # If relative, we need a base. If scopes are provided, we can't easily guess which one.
-                # But usually relative paths in this context imply relative to CWD or one of the scopes?
-                # The previous logic joined with scope_dir.
-                # If multiple scopes are allowed, joining with one specific scope is ambiguous if we don't know which one.
-                # However, if the user provides a relative path, we probably should resolve it relative to CWD 
-                # OR require absolute paths if multiple scopes are used?
-                # Let's assume relative paths are relative to CWD for resolution, then checked against scopes.
-                target_path = os.path.normpath(os.path.abspath(file_path_param))
+                target_path = os.path.normpath(os.path.abspath(target_param))
             
-            # Scope Check
+            # Scope Check: Ensure the path is within one of the allowed scopes
             allowed = False
             if not self.server.scopes:
                 # No scopes provided -> Allow all
                 allowed = True
             else:
                 for scope in self.server.scopes:
+                    # Check if the scope is a parent of the target path
                     if os.path.commonpath([scope, target_path]) == scope:
                         allowed = True
                         break
@@ -71,22 +91,31 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
                  return
                  
             if not os.path.exists(target_path):
-                self.send_error(404, "File not found")
+                self.send_error(404, "File/Directory not found")
                 return
                 
-            # Allow both files and directories
-            if not os.path.isfile(target_path) and not os.path.isdir(target_path):
-                 self.send_error(400, "Requested path is not a file or directory")
-                 return
+            # Type Enforcement: Ensure the path matches the requested type (file vs dir)
+            if is_file_request:
+                if not os.path.isfile(target_path):
+                    self.send_error(400, "Requested path is not a file (expected file-path)")
+                    return
+            else:
+                if not os.path.isdir(target_path):
+                    self.send_error(400, "Requested path is not a directory (expected dir-path)")
+                    return
 
         except Exception as e:
             self.send_error(500, f"Internal server error resolving path: {str(e)}")
             return
 
+        # Dispatch based on mode and type
         if mode == 'metadata':
             self.handle_metadata(target_path)
         else:
-            self.handle_content(target_path, depth)
+            if is_file_request:
+                self.handle_content(target_path)
+            else:
+                self.handle_directory_listing(target_path, depth)
 
     def handle_metadata(self, file_path):
         try:
@@ -130,10 +159,6 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
 
     def handle_content(self, file_path, depth=0):
         try:
-            if os.path.isdir(file_path):
-                self.handle_directory_listing(file_path, depth)
-                return
-
             # Detect MIME type
             mime_type, _ = mimetypes.guess_type(file_path)
             if mime_type is None:
