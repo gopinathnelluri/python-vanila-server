@@ -38,6 +38,10 @@ class FileRequestHandler(http.server.BaseHTTPRequestHandler):
         Parses query parameters, performs security checks (scope, path traversal),
         and dispatches to the appropriate handler (content or metadata).
         """
+        # Update last activity time for idle timeout
+        if hasattr(self.server, 'last_activity'):
+            self.server.last_activity = time.time()
+
         parsed_url = urllib.parse.urlparse(self.path)
         query_params = urllib.parse.parse_qs(parsed_url.query)
         
@@ -400,11 +404,16 @@ def self_delete_script(script_path):
     except Exception:
         pass
 
-def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, self_delete=False, allow_api_stop=False):
+def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, self_delete=False, allow_api_stop=False, idle_timeout=None):
     """
     Main entry point to run the server.
     Handles configuration, daemonization, and starting the HTTPServer.
     """
+    # Mutual exclusion check for timeout and idle_timeout
+    if timeout and idle_timeout:
+        print("Error: Cannot use both --timeout and --idle-timeout. Please choose one.")
+        sys.exit(1)
+
     # Resolve PID file path
     if pid_file:
         pid_file = os.path.abspath(pid_file)
@@ -451,19 +460,34 @@ def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, sel
     httpd.scopes = normalized_scopes
     httpd.allow_api_stop = allow_api_stop
     
-    # Auto-stop timeout
+    # Capture script path here to ensure it's available in the thread
+    script_path = os.path.abspath(__file__)
+    
+    def shutdown_server():
+        httpd.shutdown()
+        # Self-deletion logic
+        if self_delete:
+            self_delete_script(script_path)
+
+    # Auto-stop timeout (Hard limit)
     if timeout:
         print(f"Server will auto-stop in {timeout} seconds.")
-        # Capture script path here to ensure it's available in the thread
-        script_path = os.path.abspath(__file__)
-        
-        def shutdown_server():
-            httpd.shutdown()
-            # Self-deletion logic
-            if self_delete:
-                self_delete_script(script_path)
-        
         t = threading.Timer(timeout, shutdown_server)
+        t.start()
+        
+    # Idle timeout (Inactivity limit)
+    if idle_timeout:
+        print(f"Server will auto-stop after {idle_timeout} seconds of inactivity.")
+        httpd.last_activity = time.time()
+        
+        def monitor_idle():
+            while True:
+                time.sleep(1)
+                if time.time() - httpd.last_activity > idle_timeout:
+                    shutdown_server()
+                    break
+        
+        t = threading.Thread(target=monitor_idle, daemon=True)
         t.start()
 
     try:
@@ -474,7 +498,7 @@ def run(scopes, port, daemon=False, stop=False, pid_file=None, timeout=None, sel
         httpd.server_close()
     finally:
         # Ensure timer is cancelled if manual stop happens first
-        if timeout and 't' in locals():
+        if timeout and 't' in locals() and isinstance(t, threading.Timer):
             t.cancel()
 
 if __name__ == '__main__':
@@ -484,10 +508,11 @@ if __name__ == '__main__':
     parser.add_argument('--daemon', action='store_true', help="Run as a daemon process")
     parser.add_argument('--stop', action='store_true', help="Stop the running daemon")
     parser.add_argument('--pid-file', default=DEFAULT_PID_FILE, help=f"Path to PID file (default: {DEFAULT_PID_FILE})")
-    parser.add_argument('--timeout', type=int, help="Auto-stop the server after N seconds")
+    parser.add_argument('--timeout', type=int, help="Auto-stop the server after N seconds (hard limit)")
+    parser.add_argument('--idle-timeout', type=int, help="Auto-stop the server after N seconds of inactivity")
     parser.add_argument('--self-delete', action='store_true', help="Delete the server script file when timeout expires")
     parser.add_argument('--allow-api-stop', action='store_true', help="Allow stopping the server via API call (/?cmd=stop)")
     
     args = parser.parse_args()
     
-    run(args.scope, args.port, args.daemon, args.stop, args.pid_file, args.timeout, args.self_delete, args.allow_api_stop)
+    run(args.scope, args.port, args.daemon, args.stop, args.pid_file, args.timeout, args.self_delete, args.allow_api_stop, args.idle_timeout)

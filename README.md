@@ -46,7 +46,8 @@ python3 file_server.py
 | `--daemon` | Run as a background daemon process. | `False` |
 | `--stop` | Stop a running daemon (uses PID file). | `False` |
 | `--pid-file FILE` | Path to the PID file. | `file_server.pid` |
-| `--timeout SECONDS` | Auto-stop the server after N seconds. | `None` |
+| `--timeout SECONDS` | Auto-stop the server after N seconds (Hard Limit). | `None` |
+| `--idle-timeout SECONDS` | Auto-stop after N seconds of **inactivity**. | `None` |
 | `--self-delete` | **Destructive**: Delete `file_server.py` when timeout expires. | `False` |
 | `--allow-api-stop` | Allow stopping the server via `/?cmd=stop`. | `False` |
 
@@ -67,19 +68,26 @@ python3 file_server.py --daemon --pid-file /tmp/fs.pid
 python3 file_server.py --stop --pid-file /tmp/fs.pid
 ```
 
-**4. Auto-stop after 5 minutes (300s):**
+**4. Auto-stop after 5 minutes (Hard Limit):**
 ```bash
 python3 file_server.py --timeout 300
 ```
 
-**5. Auto-stop AND Self-Delete (One-time use server):**
+**5. Auto-stop after 5 minutes of INACTIVITY:**
+```bash
+python3 file_server.py --idle-timeout 300
+```
+
+**6. Auto-stop AND Self-Delete (One-time use server):**
 > [!WARNING]
 > This will **DELETE** the `file_server.py` file when the timer expires.
 ```bash
 python3 file_server.py --timeout 300 --self-delete
+# OR
+python3 file_server.py --idle-timeout 300 --self-delete
 ```
 
-**6. Allow stopping via API:**
+**7. Allow stopping via API:**
 ```bash
 python3 file_server.py --allow-api-stop
 # Then call: curl "http://localhost:7200/?cmd=stop"
